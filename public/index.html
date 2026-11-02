@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3b2418">
+  <title>Five5Star Coffee</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .hero { min-height: 100dvh; padding: 32px 16px; background: radial-gradient(circle at 20% 10%, #6b4430, #22150e 70%); color: #f6efe6; }
+    .hero-in { max-width: 960px; margin: 0 auto; }
+    .hero h1 { font-size: clamp(28px, 5vw, 44px); margin-top: 14px; }
+    .hero p.lead { opacity: .8; margin: 6px 0 28px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+    .tile { display: flex; flex-direction: column; gap: 6px; padding: 20px; border-radius: 20px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); color: inherit; text-decoration: none; transition: transform .1s, background .15s; }
+    .tile:hover { background: rgba(255,255,255,.12); }
+    .tile:active { transform: scale(.98); }
+    .tile .ico { font-size: 34px; }
+    .tile b { font-size: 18px; }
+    .tile span { font-size: 14px; opacity: .75; }
+    .foot { margin-top: 28px; font-size: 13px; opacity: .6; }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="hero-in">
+      <div class="brand" id="logo"></div>
+      <h1>Five5Star Coffee POS</h1>
+      <p class="lead">Pilih mode perangkat ini. Pilihan akan diingat di perangkat ini.</p>
+      <div class="tiles">
+        <a class="tile" href="/meja.html"><span class="ico">🪑</span><b>Tablet Meja</b><span>Pelanggan memesan sendiri dari meja</span></a>
+        <a class="tile" href="/kasir.html"><span class="ico">💳</span><b>Kasir</b><span>Konfirmasi pesanan, pembayaran, struk, stok & kas</span></a>
+        <a class="tile" href="/dapur.html"><span class="ico">👨‍🍳</span><b>Barista / Dapur</b><span>Daftar pesanan yang harus dibuat</span></a>
+        <a class="tile" href="/antrean.html"><span class="ico">📺</span><b>Monitor Antrean</b><span>Layar TV + panggilan suara otomatis</span></a>
+        <a class="tile" href="/admin.html"><span class="ico">📊</span><b>Superadmin</b><span>Laba rugi, laporan, stok, menu, meja, pengguna</span></a>
+      </div>
+      <p class="foot">Five5Star Coffee · Aplikasi kasir berbasis web — bisa dipasang sebagai aplikasi (PWA) atau lewat APK Android.</p>
+    </div>
+  </main>
+  <script type="module">
+    import { LOGO_SVG, registerSW, storage } from '/js/common.js';
+    document.getElementById('logo').innerHTML = LOGO_SVG;
+    registerSW();
+    // Perangkat yang sudah diset sebagai mode tertentu langsung diarahkan (kecuali ?pilih=1).
+    const mode = storage.get('f5_mode');
+    if (mode && !new URLSearchParams(location.search).has('pilih')) location.replace(mode);
+    document.querySelectorAll('.tile').forEach((a) => a.addEventListener('click', () => storage.set('f5_mode', a.getAttribute('href'))));
+  </script>
+</body>
+</html>

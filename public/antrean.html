@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#120c08">
+  <title>Monitor Antrean</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    body { background: #120c08; color: #f6efe6; overflow: hidden; }
+    .mon { height: 100dvh; display: grid; grid-template-rows: auto 1fr auto; }
+    .mon-head { display: flex; align-items: center; gap: 16px; padding: 2vh 3vw; background: linear-gradient(90deg, #3b2418, #22150e); }
+    .mon-head .brand-logo { width: 6vh; height: 6vh; }
+    .mon-head h1 { font-size: 3.4vh; }
+    .mon-head .sub { opacity: .7; font-size: 2vh; }
+    .clock { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
+    .clock b { font-size: 4.4vh; display: block; line-height: 1; }
+    .clock span { font-size: 1.8vh; opacity: .7; }
+    .cols { display: grid; grid-template-columns: 1fr 1.25fr; gap: 2vw; padding: 2.4vh 3vw; min-height: 0; }
+    .col { display: flex; flex-direction: column; min-height: 0; border-radius: 3vh; padding: 2.4vh 2vw; background: #1e140e; border: 1px solid #3a2a1f; }
+    .col h2 { font-size: 3vh; letter-spacing: .15em; text-transform: uppercase; display: flex; align-items: center; gap: 12px; margin-bottom: 2vh; }
+    .col.ready { background: linear-gradient(160deg, #18452d, #0f2a1c); border-color: #2f8f5b; }
+    .nums { display: grid; gap: 1.6vh; grid-template-columns: repeat(auto-fill, minmax(17vh, 1fr)); align-content: start; overflow: hidden; }
+    .col.ready .nums { grid-template-columns: repeat(auto-fill, minmax(24vh, 1fr)); }
+    .num-card { border-radius: 2vh; padding: 1.6vh 1vw; background: #2a1d15; text-align: center; }
+    .num-card b { display: block; font-size: 5.4vh; font-weight: 900; line-height: 1.05; letter-spacing: .02em; }
+    .num-card span { display: block; font-size: 1.9vh; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .col.ready .num-card { background: #2f8f5b; color: #fff; }
+    .col.ready .num-card b { font-size: 8vh; }
+    .num-card.flash { animation: flash 1s ease-in-out 6; }
+    @keyframes flash { 50% { background: #d29b2e; color: #2a1c14; transform: scale(1.04); } }
+    .num-card.pending { opacity: .65; border: 1px dashed #6b5546; background: transparent; }
+    .ticker { background: #d29b2e; color: #2a1c14; font-weight: 700; font-size: 2.4vh; padding: 1.2vh 0; overflow: hidden; white-space: nowrap; }
+    .ticker span { display: inline-block; padding-left: 100%; animation: tick 30s linear infinite; }
+    @keyframes tick { to { transform: translateX(-100%); } }
+    .call { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(10, 6, 4, .88); animation: fade .25s; }
+    .call .box { text-align: center; padding: 5vh 6vw; border-radius: 5vh; background: linear-gradient(160deg, #2f8f5b, #17583a); box-shadow: 0 0 120px rgba(47, 143, 91, .6); min-width: 60vw; }
+    .call .lbl { font-size: 4vh; letter-spacing: .2em; text-transform: uppercase; opacity: .9; }
+    .call .no { font-size: 26vh; font-weight: 900; line-height: 1; margin: 2vh 0; animation: pulse 1.2s ease-in-out infinite; }
+    .call .who { font-size: 5vh; font-weight: 700; }
+    .call .where { font-size: 3vh; opacity: .9; margin-top: 1vh; }
+    @keyframes pulse { 50% { transform: scale(1.06); } }
+    .unlock { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; background: rgba(10, 6, 4, .92); cursor: pointer; text-align: center; padding: 20px; }
+    .unlock .btn { font-size: 3vh; min-height: 9vh; padding: 0 5vw; }
+    .empty-col { margin: auto; text-align: center; opacity: .5; font-size: 2.6vh; }
+    .tools { position: fixed; right: 10px; bottom: 60px; display: flex; gap: 8px; opacity: 0; transition: opacity .3s; }
+    body:hover .tools { opacity: .9; }
+    @media (orientation: portrait) {
+      .cols { grid-template-columns: 1fr; grid-template-rows: 1fr 1.3fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mon">
+    <header class="mon-head">
+      <span id="logo"></span>
+      <div><h1 id="store">Five5Star Coffee</h1><div class="sub">Monitor Antrean Pesanan</div></div>
+      <div class="clock"><b id="clock">--:--</b><span id="date"></span></div>
+      <span class="conn" id="conn"></span>
+    </header>
+    <main class="cols">
+      <section class="col"><h2>⏳ Sedang Dibuat <span class="badge" id="c-prep">0</span></h2><div class="nums" id="prep"></div></section>
+      <section class="col ready"><h2>✅ Silakan Diambil <span class="badge ready" id="c-ready">0</span></h2><div class="nums" id="ready"></div></section>
+    </main>
+    <div class="ticker"><span id="ticker">Selamat datang di Five5Star Coffee ☕ Pesan langsung dari tablet di meja Anda. Nomor antrean akan dipanggil saat pesanan siap. Terima kasih!</span></div>
+  </div>
+  <div class="tools"><button class="btn sm" id="btn-test">🔊 Tes suara</button><button class="btn sm" id="btn-full">⛶ Layar penuh</button></div>
+  <div class="unlock" id="unlock"><div><div style="font-size:8vh">🔊</div><h2 style="font-size:4vh;margin:2vh 0">Ketuk untuk mengaktifkan suara panggilan</h2>
+    <p style="opacity:.7;font-size:2vh;margin-bottom:3vh">Browser mewajibkan satu ketukan sebelum dapat memutar suara.</p><button class="btn gold">Aktifkan Suara & Mulai</button></div></div>
+  <script type="module" src="/js/antrean.js"></script>
+</body>
+</html>

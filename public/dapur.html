@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3b2418">
+  <title>Barista / Dapur</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .board { display: grid; grid-template-columns: 0.8fr 1.4fr 1fr; gap: 12px; padding: 12px; height: calc(100dvh - 64px); }
+    .lane { display: flex; flex-direction: column; min-height: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
+    .lane h2 { font-size: 16px; padding: 12px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+    .lane .list { flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .ticket { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--info); border-radius: 14px; padding: 12px; box-shadow: var(--shadow); }
+    .ticket.pending { border-left-color: var(--warn); opacity: .85; }
+    .ticket.ready { border-left-color: var(--ok); }
+    .ticket.late { border-left-color: var(--bad); }
+    .ticket .q { font-size: 26px; font-weight: 900; }
+    .ticket ul { margin: 8px 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .ticket li { display: flex; gap: 8px; font-size: 17px; }
+    .ticket li b { min-width: 30px; }
+    .ticket .opts { font-size: 14px; color: var(--ink-2); }
+    .ticket .note { font-size: 14px; background: var(--warn-soft); color: var(--warn); padding: 4px 8px; border-radius: 8px; margin-top: 2px; }
+    .timer { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .timer.late { color: var(--bad); }
+    @media (max-width: 900px) { .board { grid-template-columns: 1fr; height: auto; } .lane { max-height: none; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span id="logo"></span><div>Barista / Dapur<small id="who"></small></div></div>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-stock">🚫 Menu Habis</button>
+    <button class="btn" id="btn-sound">🔔 Suara: Aktif</button>
+    <button class="btn" id="btn-logout">Keluar</button>
+    <span class="conn" id="conn"></span>
+  </header>
+  <main class="board">
+    <section class="lane"><h2>🕓 Menunggu Kasir <span class="badge pending" id="n-pending">0</span></h2><div class="list" id="l-pending"></div></section>
+    <section class="lane"><h2>🔥 Dibuat <span class="badge preparing" id="n-preparing">0</span></h2><div class="list" id="l-preparing"></div></section>
+    <section class="lane"><h2>✅ Siap / Dipanggil <span class="badge ready" id="n-ready">0</span></h2><div class="list" id="l-ready"></div></section>
+  </main>
+  <script type="module" src="/js/dapur.js"></script>
+</body>
+</html>
