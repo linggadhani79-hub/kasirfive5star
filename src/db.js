@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS orders (
   cogs INTEGER NOT NULL DEFAULT 0,
   fees TEXT NOT NULL DEFAULT '[]',
   tax_inclusive INTEGER NOT NULL DEFAULT 0,
+  payment_request TEXT NOT NULL DEFAULT '',
   stock_deducted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   accepted_at TEXT,
@@ -189,6 +190,9 @@ export const DEFAULT_SETTINGS = {
   service_percent: '0',
   // Biaya tambahan otomatis: [{name, type:'percent'|'fixed', value, applies:'all'|'dine_in'|'takeaway'}]
   extra_fees: '[]',
+  // QRIS statis milik toko (isi kode dari stiker QRIS); diubah jadi QRIS bernominal per pesanan
+  qris_enabled: '0',
+  qris_payload: '',
   timezone: 'Asia/Jakarta',
   auto_accept: '0',
   require_payment_first: '0',
@@ -280,6 +284,7 @@ function migrate(db) {
   const cols = new Set(db.prepare("SELECT name FROM pragma_table_info('orders')").all().map((c) => c.name));
   if (!cols.has('fees')) db.exec("ALTER TABLE orders ADD COLUMN fees TEXT NOT NULL DEFAULT '[]'");
   if (!cols.has('tax_inclusive')) db.exec('ALTER TABLE orders ADD COLUMN tax_inclusive INTEGER NOT NULL DEFAULT 0');
+  if (!cols.has('payment_request')) db.exec("ALTER TABLE orders ADD COLUMN payment_request TEXT NOT NULL DEFAULT ''");
 }
 
 export async function initDb(storage, env = {}) {

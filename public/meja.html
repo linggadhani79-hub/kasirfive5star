@@ -31,6 +31,10 @@
     .ready-alert { position: fixed; inset: 0; z-index: 250; background: rgba(20,12,8,.8); display: grid; place-items: center; padding: 20px; animation: fade .2s; }
     .ready-alert .box { background: var(--ok); color: #fff; border-radius: 28px; padding: 32px; text-align: center; max-width: 520px; width: 100%; box-shadow: var(--shadow-lg); }
     .ready-alert .no { font-size: 84px; font-weight: 900; line-height: 1; margin: 10px 0; }
+    .qris-pay { text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+    .qris-pay svg { width: min(300px, 70vw); height: auto; background: #fff; border-radius: 16px; padding: 6px; }
+    .qris-pay .amt { font-size: 34px; font-weight: 900; color: var(--brand-2); }
+    .paid-ok { background: var(--ok-soft); color: var(--ok); border-radius: 16px; padding: 18px; font-weight: 700; width: 100%; }
     .steps { display: flex; gap: 6px; }
     .steps i { flex: 1; height: 6px; border-radius: 6px; background: var(--line); }
     .steps i.on { background: var(--gold); }
@@ -71,6 +75,7 @@
       <div class="cart-items" id="cart-items"></div>
       <div class="cart-foot">
         <div class="seg" id="otype"><button data-v="dine_in" class="on">🍽️ Makan di sini</button><button data-v="takeaway">🛍️ Bawa pulang</button></div>
+        <div class="seg hidden" id="paytype"><button data-p="qris" class="on">📱 Bayar QRIS</button><button data-p="kasir">💵 Bayar di kasir</button></div>
         <input class="input" id="cust-name" maxlength="40" placeholder="Nama Anda (untuk dipanggil)">
         <input class="input" id="order-note" maxlength="300" placeholder="Catatan pesanan (opsional)">
         <div id="totals"></div>

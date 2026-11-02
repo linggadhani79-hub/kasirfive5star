@@ -635,6 +635,12 @@ async function renderSettings() {
     <div class="card pad stack"><h3>PPN</h3><div class="grid-3">${f('tax_percent', 'PPN (%)', 'inputmode="decimal"')}${f('timezone', 'Zona waktu')}</div>
       ${chk('tax_inclusive', 'Harga menu sudah termasuk PPN (PPN dihitung dari dalam harga, tidak ditambahkan ke tagihan)')}
       ${f('payment_methods', 'Metode pembayaran (pisahkan koma; "Tunai" untuk hitung kembalian)')}</div>
+    <div class="card pad stack"><h3>QRIS</h3>
+      <p class="small muted" style="margin:0">Pakai QRIS statis toko (dari bank / e-wallet). Aplikasi membuat QRIS dengan <b>nominal otomatis</b> untuk tiap pesanan; dana tetap masuk ke akun QRIS Anda. Setelah pelanggan membayar, kasir menerima notifikasi dan cukup menekan <b>QRIS sudah masuk</b> — pesanan otomatis lunas & masuk antrean dapur.</p>
+      <div class="row wrap"><label class="btn gold">📷 Upload foto / screenshot QRIS<input type="file" accept="image/*" id="qris-file" hidden></label><span class="small muted">atau tempel kode QRIS (teks) di bawah</span></div>
+      <textarea class="input" data-s="qris_payload" id="qris-payload" placeholder="000201010211...6304XXXX" style="font-family:monospace;font-size:12px">${esc(s.qris_payload || '')}</textarea>
+      <div id="qris-info" class="qris-box"></div>
+      ${chk('qris_enabled', 'Aktifkan pembayaran QRIS (tampil di tablet meja & kasir)')}</div>
     <div class="card pad stack"><h3>Biaya tambahan otomatis</h3>
       <p class="small muted" style="margin:0">Ditambahkan otomatis ke setiap pesanan sesuai jenisnya, mis. service charge 5% atau biaya kemasan Rp2.000 untuk bawa pulang.</p>
       <div class="stack" id="fees">${fees.map(feeRow).join('')}</div>
@@ -650,6 +656,43 @@ async function renderSettings() {
     <div class="card pad stack"><h3>Kategori keuangan</h3>${f('expense_categories', 'Kategori pengeluaran (pisahkan koma)')}${f('income_categories', 'Kategori pemasukan lain (pisahkan koma)')}</div>
     <div class="row"><span class="grow"></span><button class="btn gold lg" data-save>Simpan Pengaturan</button></div>
   </div>`;
+  const inspect = async () => {
+    const payload = $('#qris-payload').value.trim();
+    if (!payload) return ($('#qris-info').innerHTML = '');
+    try {
+      const r = await api('/admin/qris/inspect', { method: 'POST', body: { payload } });
+      $('#qris-info').innerHTML = `${r.sample_svg}<div class="stack small"><div>✅ <b>QRIS valid</b></div><div>Merchant: <b>${esc(r.merchant_name)}</b></div><div>Kota: ${esc(r.merchant_city)}</div>
+        <div class="muted">Contoh di samping: QRIS nominal Rp1.000. Coba scan dengan aplikasi bank/e-wallet untuk memastikan nama merchant & nominal benar (tidak perlu dibayar).</div></div>`;
+    } catch (err) {
+      $('#qris-info').innerHTML = `<div class="card pad small" style="background:var(--bad-soft)">⚠️ ${esc(err.message)}</div>`;
+    }
+  };
+  $('#qris-payload').addEventListener('change', inspect);
+  $('#qris-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    await img.decode().catch(() => {});
+    // Coba beberapa ukuran agar foto besar/kecil tetap terbaca
+    let code = null;
+    for (const max of [1000, 1600, 700, 2400]) {
+      const sc = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * sc);
+      c.height = Math.round(img.height * sc);
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      code = window.jsQR?.(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height, { inversionAttempts: 'attemptBoth' });
+      if (code?.data) break;
+    }
+    URL.revokeObjectURL(img.src);
+    e.target.value = '';
+    if (!code?.data) return toast('QR tidak terbaca. Gunakan foto yang lebih jelas / screenshot QRIS.', 'bad', 5000);
+    $('#qris-payload').value = code.data;
+    inspect();
+  });
+  inspect();
   $('#main').onclick = async (e) => {
     if (e.target.closest('[data-addfee]')) return $('#fees').insertAdjacentHTML('beforeend', feeRow());
     if (e.target.closest('[data-delfee]')) return e.target.closest('[data-fee]').remove();
