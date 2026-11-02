@@ -33,6 +33,16 @@ PIN awal: **Superadmin `123456`**, **Kasir `1111`** → segera ganti di *Superad
 - **Laba rugi**: Penjualan bersih − HPP = Laba kotor − selisih stok − biaya operasional + pendapatan lain = **Laba bersih**. Pajak dicatat terpisah sebagai titipan.
 - Laporan harian (dengan jam ramai), bulanan (rincian per hari), tahunan (rincian per bulan), produk terlaris + margin, metode bayar, ekspor CSV (Excel).
 
+**PPN & biaya tambahan**: harga menu sudah termasuk PPN (default 11%, PPN dihitung dari dalam harga). Biaya tambahan
+otomatis (persen/nominal; semua pesanan, makan di tempat, atau bawa pulang) diatur di *Superadmin → Pengaturan*.
+
+**QRIS (statis bank / e-wallet)**: upload foto stiker QRIS di *Superadmin → Pengaturan → QRIS*. Aplikasi membuat QRIS
+dengan **nominal otomatis** per pesanan (dana tetap masuk ke akun QRIS toko). Alur: pelanggan pilih *Bayar QRIS* di tablet
+→ scan & bayar → tekan *Saya sudah bayar* → kasir mendapat notifikasi realtime → cek dana di aplikasi QRIS merchant →
+tekan *QRIS sudah masuk* → pesanan **lunas & otomatis masuk antrean dapur**, tablet meja ikut berubah realtime.
+QRIS statis tidak mengirim notifikasi ke aplikasi, sehingga verifikasi dana tetap 1 ketukan kasir; untuk konfirmasi
+100% otomatis dibutuhkan QRIS dari payment gateway (mis. Midtrans/Xendit) yang punya webhook.
+
 **Menu** sudah terisi dari *Buku Menu Five5Star (26 Oktober)*: 113 produk dalam 20 kategori lengkap dengan foto
 (`public/img/menu/`), harga Regular/Large, dan opsi Hot/Ice. HPP/resep belum diisi — lengkapi di *Superadmin → Menu & Resep*
 agar laporan laba akurat.

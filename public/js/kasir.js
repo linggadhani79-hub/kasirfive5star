@@ -58,7 +58,7 @@ function renderOrders() {
         .map(
           (o) => `<button class="orow ${o.id === selectedId ? 'sel' : ''}" data-oid="${o.id}"><span class="q">${esc(o.queue_label)}</span>
           <span class="grow"><b>${esc(o.customer_name || '-')}</b><div class="small muted">${esc(o.table_name || (o.source === 'kasir' ? 'Kasir' : ''))} · ${timeOf(o.created_at)} · ${o.items.reduce((a, b) => a + b.qty, 0)} item</div></span>
-          <span class="stack" style="align-items:flex-end;gap:4px"><span class="badge ${o.status}">${STATUS_LABEL[o.status]}</span><span class="badge ${o.payment_status}">${o.payment_status === 'paid' ? 'Lunas' : rupiah(o.total)}</span></span></button>`
+          <span class="stack" style="align-items:flex-end;gap:4px"><span class="badge ${o.status}">${STATUS_LABEL[o.status]}</span><span class="badge ${o.payment_status}">${o.payment_status === 'paid' ? 'Lunas' : rupiah(o.total)}</span>${o.payment_status !== 'paid' && o.payment_request === 'QRIS_CLAIMED' ? '<span class="badge pending">📱 Cek QRIS</span>' : o.payment_status !== 'paid' && o.payment_request === 'QRIS' ? '<span class="badge">📱 QRIS</span>' : ''}</span></button>`
         )
         .join('') || '<div class="empty"><div class="big">☕</div>Tidak ada pesanan</div>'}</div>
     </section>
@@ -87,11 +87,16 @@ function detailHtml(o) {
         <div class="tot big"><span>Total</span><span>${rupiah(o.total)}</span></div>
         ${o.payment_status === 'paid' ? `<div class="tot small muted"><span>Dibayar ${esc(o.payment_method)}</span><span>${rupiah(o.paid_amount)} · kembali ${rupiah(o.change_amount)}</span></div>` : ''}
       </div></div>
+    ${o.payment_status === 'unpaid' && o.status !== 'cancelled' && o.payment_request ? `<div class="card pad stack" style="background:${o.payment_request === 'QRIS_CLAIMED' ? 'var(--warn-soft)' : 'var(--info-soft)'}">
+      <b>${o.payment_request === 'QRIS_CLAIMED' ? '📱 Pelanggan menyatakan SUDAH membayar QRIS' : '📱 Pelanggan memilih bayar QRIS'} — ${rupiah(o.total)}</b>
+      <span class="small">Cek notifikasi / mutasi di aplikasi QRIS merchant (nominal ${rupiah(o.total)}). Jika dana sudah masuk, tekan tombol di bawah — pesanan otomatis lunas & masuk antrean dapur.</span>
+      <div class="row wrap"><button class="btn ok lg" data-act="qrisok">✅ QRIS sudah masuk</button><button class="btn" data-act="showqris">Tampilkan QRIS</button></div></div>` : ''}
     <div class="detail-actions">
       ${o.status === 'pending' ? `<button class="btn ok lg" data-act="preparing">✅ Terima → Barista</button>` : ''}
       ${o.status === 'preparing' ? `<button class="btn ok lg" data-act="ready">🔔 Tandai Siap & Panggil</button>` : ''}
       ${o.status === 'ready' ? `<button class="btn lg" data-act="call">🔊 Panggil Ulang</button><button class="btn primary lg" data-act="done">✔ Sudah Diambil</button>` : ''}
       ${o.payment_status === 'unpaid' && o.status !== 'cancelled' ? `<button class="btn gold lg" data-act="pay">💳 Bayar ${rupiah(o.total)}</button>` : ''}
+      ${o.payment_status === 'unpaid' && o.status !== 'cancelled' && settings.qris_enabled && !o.payment_request ? `<button class="btn lg" data-act="showqris">📱 Tampilkan QRIS</button>` : ''}
       <button class="btn lg" data-act="print">🖨️ Cetak Struk</button>
       ${can(true) ? `<button class="btn outline-bad lg" data-act="cancel">✕ Batalkan</button>` : ''}
     </div>
@@ -118,6 +123,14 @@ $('#view').addEventListener('click', async (e) => {
   const act = a.dataset.act;
   try {
     if (act === 'pay') return payDialog(o);
+    if (act === 'showqris') return showQris(`/orders/${o.id}/qris`, o.queue_label);
+    if (act === 'qrisok') {
+      if (!(await confirmBox(`Pastikan dana ${rupiah(o.total)} sudah masuk di aplikasi QRIS. Tandai lunas & kirim ke dapur?`, { ok: 'Ya, sudah masuk' }))) return;
+      const paid = await api(`/orders/${o.id}/pay`, { method: 'POST', body: { method: qrisMethod() } });
+      upsert(paid);
+      render();
+      return toast(`${paid.queue_label} lunas via QRIS — masuk antrean dapur`, 'ok', 4000);
+    }
     if (act === 'print') return printReceipt(o, settings);
     if (act === 'call') {
       await api(`/orders/${o.id}/call`, { method: 'POST' });
@@ -157,6 +170,38 @@ function upsert(o) {
   else orders.unshift(o);
 }
 
+// ---------- QRIS ----------
+const qrisMethod = () => settings.payment_methods.find((m) => /qris/i.test(m)) || 'QRIS';
+async function showQris(path, label = '') {
+  try {
+    const q = await api(path);
+    modal({
+      title: `QRIS ${esc(label)}`,
+      body: `<div style="text-align:center" class="stack"><div style="display:flex;justify-content:center">${q.svg.replace('<svg', '<svg style="width:300px;height:300px;background:#fff;border-radius:12px"')}</div>
+        <div style="font-size:32px;font-weight:900">${rupiah(q.amount)}</div><div class="small muted">a.n. ${esc(q.merchant_name)} · nominal terisi otomatis</div></div>`,
+    });
+  } catch (err) {
+    toast(err.message, 'bad');
+  }
+}
+function claimPopup(c) {
+  const el = document.createElement('div');
+  el.className = 'waiter';
+  el.style.background = 'var(--ok)';
+  el.style.color = '#fff';
+  el.innerHTML = `<span style="font-size:26px">📱</span><div><div>${esc(c.queue_label)} · ${esc(c.table_name || '')} sudah bayar QRIS</div><div class="small">${esc(c.customer_name || '')} · ${rupiah(c.total)} — cek & konfirmasi</div></div><button class="btn sm">Lihat</button>`;
+  el.querySelector('button').onclick = () => {
+    el.remove();
+    view = 'orders';
+    selectedId = c.id;
+    filter = 'unpaid';
+    $$('#side button').forEach((x) => x.classList.toggle('active', x.dataset.view === 'orders'));
+    render();
+  };
+  document.body.append(el);
+  setTimeout(() => el.remove(), 120000);
+}
+
 // ---------- Pembayaran ----------
 function payDialog(o, { onPaid } = {}) {
   let method = settings.payment_methods[0];
@@ -171,13 +216,23 @@ function payDialog(o, { onPaid } = {}) {
         <label class="field"><span>Uang diterima</span><input class="input num" data-paid inputmode="numeric" style="font-size:24px;font-weight:800" value="${o.total}"></label>
         <div class="cash-grid">${quick.map((q) => `<button class="btn" data-q="${q}">${q === o.total ? 'Uang pas' : rupiah(q)}</button>`).join('')}</div>
         <div class="tot big"><span>Kembalian</span><span data-change>Rp0</span></div>
-      </div>`,
+      </div>
+      <div data-qris class="hidden" style="text-align:center"></div>`,
     foot: '<button class="btn" data-close>Batal</button><button class="btn gold lg" data-ok>Konfirmasi Bayar</button>',
   });
   const paidVal = () => Number(m.$('[data-paid]').value.replace(/\D/g, '')) || 0;
   const draw = () => {
     m.$$('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === method));
     m.$('[data-cash]').classList.toggle('hidden', method !== 'Tunai');
+    const isQris = /qris/i.test(method) && settings.qris_enabled;
+    m.$('[data-qris]').classList.toggle('hidden', !isQris);
+    if (isQris && !m.$('[data-qris]').dataset.loaded) {
+      m.$('[data-qris]').dataset.loaded = '1';
+      m.$('[data-qris]').innerHTML = '<div class="muted small">Memuat QRIS…</div>';
+      api(`/qris?amount=${o.total}`)
+        .then((q) => (m.$('[data-qris]').innerHTML = `<div style="display:flex;justify-content:center">${q.svg.replace('<svg', '<svg style="width:240px;height:240px;background:#fff;border-radius:12px"')}</div><div class="small muted">Minta pelanggan scan · a.n. ${esc(q.merchant_name)} · konfirmasi setelah dana masuk</div>`))
+        .catch((err) => (m.$('[data-qris]').innerHTML = `<div class="small" style="color:var(--bad)">${esc(err.message)}</div>`));
+    }
     const ch = paidVal() - o.total;
     m.$('[data-change]').textContent = ch >= 0 ? rupiah(ch) : 'Kurang ' + rupiah(-ch);
   };
@@ -482,6 +537,10 @@ async function loadAll() {
   rt.on('order:new', (o) => {
     chime({ notes: [660, 880, 1100], gap: 0.16, volume: 0.3 });
     toast(`🔔 Pesanan baru ${o.queue_label} — ${o.table_name || 'Kasir'} (${o.customer_name || '-'})`, 'gold', 6000);
+  });
+  rt.on('payment:claim', (c) => {
+    chime({ notes: [784, 988, 1175, 1568], gap: 0.13, volume: 0.3 });
+    claimPopup(c);
   });
   rt.on('waiter:call', (w) => {
     chime({ notes: [523, 659, 784, 1047], gap: 0.14, volume: 0.3 });

@@ -12,6 +12,7 @@ let code = params.get('t') || storage.get('f5_table');
 let table, settings, menu = { categories: [], products: [] };
 let cart = [];
 let orderType = 'dine_in';
+let payType = 'qris';
 let myOrders = [];
 let activeCat = 'all';
 
@@ -66,6 +67,7 @@ async function init() {
   cart = cart.filter((c) => menu.products.some((p) => p.id === c.product_id));
   renderMenu();
   renderCart();
+  renderPayType();
   loadOrders();
 
   const rt = new Realtime({ table: code });
@@ -77,6 +79,7 @@ async function init() {
     else myOrders.unshift(o);
     renderOrdersCount();
     if ($('#orders-modal')) showOrders();
+    if (qrisModal?.orderId === o.id) updateQrisModal(o);
   });
   rt.on('queue:announce', (a) => readyAlert(a));
   rt.on('menu:changed', async () => {
@@ -87,6 +90,7 @@ async function init() {
   rt.on('settings:changed', (s) => {
     settings = s;
     renderCart();
+    renderPayType();
   });
 }
 
@@ -205,6 +209,66 @@ $('#otype').addEventListener('click', (e) => {
   $$('#otype button').forEach((x) => x.classList.toggle('on', x === b));
   renderCart();
 });
+function renderPayType() {
+  $('#paytype').classList.toggle('hidden', !settings?.qris_enabled);
+  if (!settings?.qris_enabled) payType = 'kasir';
+  $$('#paytype button').forEach((x) => x.classList.toggle('on', x.dataset.p === payType));
+}
+$('#paytype').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-p]');
+  if (!b) return;
+  payType = b.dataset.p;
+  renderPayType();
+});
+
+// ---------- Pembayaran QRIS ----------
+let qrisModal = null;
+async function openQris(order) {
+  qrisModal?.close();
+  let q;
+  try {
+    q = await api(`/public/tables/${encodeURIComponent(code)}/orders/${order.id}/qris`);
+  } catch (e) {
+    return toast(e.message, 'bad', 5000);
+  }
+  const m = modal({
+    title: `Bayar QRIS — ${esc(q.queue_label)}`,
+    body: `<div class="qris-pay" data-qbody>
+      <div class="muted small">Scan dengan aplikasi bank / e-wallet apa pun</div>
+      ${q.svg}
+      <div class="amt">${rupiah(q.amount)}</div>
+      <div class="small muted">a.n. <b>${esc(q.merchant_name)}</b> · nominal sudah terisi otomatis</div>
+      <div data-qstatus></div>
+    </div>`,
+    foot: '<button class="btn" data-close>Tutup</button><button class="btn gold lg" data-claim>✅ Saya sudah bayar</button>',
+    onClose: () => (qrisModal = null),
+  });
+  qrisModal = { ...m, orderId: order.id };
+  m.$('[data-claim]').onclick = async () => {
+    try {
+      updateQrisModal(await api(`/public/tables/${encodeURIComponent(code)}/orders/${order.id}/qris-claim`, { method: 'POST' }));
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
+  updateQrisModal(order);
+}
+function updateQrisModal(o) {
+  if (!qrisModal) return;
+  const st = qrisModal.$('[data-qstatus]');
+  const claim = qrisModal.$('[data-claim]');
+  if (o.payment_status === 'paid') {
+    qrisModal.$('[data-qbody]').innerHTML = `<div class="paid-ok"><div style="font-size:48px">✅</div><div style="font-size:22px">Pembayaran diterima!</div>
+      <div style="font-weight:500;margin-top:6px">Pesanan ${esc(o.queue_label)} masuk antrean dapur. Nomor Anda akan dipanggil saat siap.</div></div>`;
+    if (claim) claim.remove();
+    chime({ notes: [880, 1175, 1568], gap: 0.15, volume: 0.25 });
+    setTimeout(() => qrisModal?.close(), 8000);
+  } else if (o.payment_request === 'QRIS_CLAIMED') {
+    st.innerHTML = '<div class="badge pending" style="font-size:14px;padding:8px 12px">⏳ Menunggu kasir memverifikasi pembayaran…</div>';
+    if (claim) claim.disabled = true;
+  }
+}
+
 $('#cart-bar').onclick = () => $('#cart').classList.add('open');
 $('#cart-close').onclick = () => $('#cart').classList.remove('open');
 
@@ -224,6 +288,7 @@ $('#btn-submit').onclick = async () => {
         customer_name: name,
         note: $('#order-note').value.trim(),
         order_type: orderType,
+        payment: payType,
         items: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, options: c.options, note: c.note })),
       },
     });
@@ -236,6 +301,7 @@ $('#btn-submit').onclick = async () => {
     if (!myOrders.some((x) => x.id === o.id)) myOrders.unshift(o);
     renderOrdersCount();
     chime({ notes: [880, 1175], volume: 0.2 });
+    if (payType === 'qris' && settings.qris_enabled) return openQris(o);
     modal({
       title: 'Pesanan terkirim! 🎉',
       body: `<div style="text-align:center"><div class="muted">Nomor antrean Anda</div>
@@ -276,7 +342,8 @@ function showOrders() {
           <span class="badge ${o.status}">${STATUS_LABEL[o.status]}</span></div>
           <div class="steps">${[1, 2, 3, 4].map((s) => `<i class="${(step[o.status] || 0) >= s ? 'on' : ''}"></i>`).join('')}</div>
           <div class="small">${o.items.map((i) => `${i.qty}× ${esc(i.name)}${i.options?.length ? ` <span class="muted">(${esc(i.options.map((x) => x.name).join(', '))})</span>` : ''}`).join('<br>')}</div>
-          <div class="row"><span class="badge ${o.payment_status}">${o.payment_status === 'paid' ? 'Lunas' : 'Belum bayar'}</span><span class="grow"></span><b>${rupiah(o.total)}</b></div></div>`
+          <div class="row"><span class="badge ${o.payment_status}">${o.payment_status === 'paid' ? 'Lunas' : o.payment_request === 'QRIS_CLAIMED' ? 'Menunggu verifikasi' : 'Belum bayar'}</span><span class="grow"></span><b>${rupiah(o.total)}</b></div>
+          ${o.payment_status !== 'paid' && o.status !== 'cancelled' && settings.qris_enabled ? `<button class="btn gold block" data-payqris="${o.id}">📱 Bayar dengan QRIS</button>` : ''}</div>`
         )
         .join('')
     : '<div class="empty"><div class="big">🧾</div>Belum ada pesanan hari ini dari meja ini.</div>';
@@ -284,6 +351,12 @@ function showOrders() {
   if (existing) return (existing.querySelector('.modal-body').innerHTML = body);
   const m = modal({ title: `Pesanan ${esc(table.name)}`, body });
   m.el.id = 'orders-modal';
+  m.el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-payqris]');
+    if (!b) return;
+    m.close();
+    openQris(myOrders.find((x) => x.id === Number(b.dataset.payqris)));
+  });
 }
 $('#btn-orders').onclick = () => {
   unlockAudio();

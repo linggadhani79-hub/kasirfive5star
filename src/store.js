@@ -3,6 +3,7 @@
 import QRCode from 'qrcode';
 import { tx, hashPin, verifyPin, randomCode, randomToken, DEFAULT_SETTINGS } from './db.js';
 import { Router } from './router.js';
+import { inspectQris, qrisWithAmount } from './qris.js';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -37,6 +38,8 @@ export function createStore({ db, broadcast }) {
     service_percent: Number(s.service_percent) || 0,
     tax_inclusive: s.tax_inclusive === '1',
     extra_fees: parseFees(s),
+    qris_enabled: qrisInfo(s) !== null,
+    qris_merchant: qrisInfo(s)?.merchant_name || '',
     voice_template: s.voice_template,
     voice_repeat: Number(s.voice_repeat) || 1,
     voice_rate: Number(s.voice_rate) || 1,
@@ -65,6 +68,23 @@ export function createStore({ db, broadcast }) {
       }));
     if (Number(s.service_percent) > 0) out.unshift({ name: 'Service charge', type: 'percent', value: Number(s.service_percent), applies: 'all' });
     return out;
+  };
+
+  // QRIS toko (null bila belum diaktifkan / kode tidak valid)
+  const qrisInfo = (s) => {
+    if (s.qris_enabled !== '1' || !s.qris_payload) return null;
+    try {
+      return inspectQris(s.qris_payload);
+    } catch {
+      return null;
+    }
+  };
+  const qrisSvg = async (amount) => {
+    const info = qrisInfo(getSettings());
+    if (!info) throw bad('QRIS belum diaktifkan di Pengaturan');
+    const payload = qrisWithAmount(info.payload, amount);
+    const svg = await QRCode.toString(payload, { type: 'svg', margin: 2, width: 320, errorCorrectionLevel: 'M' });
+    return { svg, payload, amount: Math.round(amount), merchant_name: info.merchant_name, merchant_city: info.merchant_city };
   };
 
   const nowIso = () => new Date().toISOString();
@@ -113,6 +133,7 @@ export function createStore({ db, broadcast }) {
     discount: o.discount,
     fees: o.fees,
     tax_inclusive: o.tax_inclusive,
+    payment_request: o.payment_request,
     note: o.note,
     created_at: o.created_at,
     ready_at: o.ready_at,
@@ -212,7 +233,7 @@ export function createStore({ db, broadcast }) {
     return { fees, service, tax, total };
   };
 
-  const createOrder = ({ items, table, customer_name, note, order_type, source, cashier_id, discount = 0 }) => {
+  const createOrder = ({ items, table, customer_name, note, order_type, source, cashier_id, discount = 0, payment_request = '' }) => {
     const priced = priceItems(items);
     const s = publicSettings();
     const subtotal = priced.reduce((a, b) => a + b.line_total, 0);
@@ -230,8 +251,8 @@ export function createStore({ db, broadcast }) {
       const res = db
         .prepare(
           `INSERT INTO orders (queue_no, business_date, table_id, table_name, customer_name, note, order_type, source, status,
-             subtotal, discount, service, tax, total, cashier_id, created_at, accepted_at, fees, tax_inclusive)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             subtotal, discount, service, tax, total, cashier_id, created_at, accepted_at, fees, tax_inclusive, payment_request)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           next,
@@ -252,7 +273,8 @@ export function createStore({ db, broadcast }) {
           now,
           autoAccept ? now : null,
           JSON.stringify(fees),
-          s.tax_inclusive ? 1 : 0
+          s.tax_inclusive ? 1 : 0,
+          payment_request
         );
       const orderId = Number(res.lastInsertRowid);
       const insItem = db.prepare(
@@ -471,6 +493,7 @@ export function createStore({ db, broadcast }) {
         note: b.note,
         order_type: b.order_type,
         source: 'meja',
+        payment_request: b.payment === 'qris' && publicSettings().qris_enabled ? 'QRIS' : '',
       });
       return publicOrder(order);
     })
@@ -488,6 +511,59 @@ export function createStore({ db, broadcast }) {
       return { ok: true };
     })
   );
+  // ---------- QRIS ----------
+  const tableOrder = (code, id) => {
+    const t = tableByCode(code);
+    const o = loadOrder(Number(id));
+    if (!o || o.table_id !== t.id) throw new HttpError(404, 'Pesanan tidak ditemukan');
+    return o;
+  };
+  api.get(
+    '/public/tables/:code/orders/:id/qris',
+    wrap(async (req) => {
+      const o = tableOrder(req.params.code, req.params.id);
+      if (o.payment_status === 'paid') throw bad('Pesanan sudah lunas');
+      if (o.status === 'cancelled') throw bad('Pesanan dibatalkan');
+      if (o.payment_request !== 'QRIS' && o.payment_request !== 'QRIS_CLAIMED') {
+        db.prepare("UPDATE orders SET payment_request = 'QRIS' WHERE id = ?").run(o.id);
+        broadcastOrder(loadOrder(o.id));
+      }
+      return { ...(await qrisSvg(o.total)), queue_label: o.queue_label };
+    })
+  );
+  // Pelanggan menekan "Saya sudah bayar" -> kasir mendapat notifikasi untuk verifikasi
+  api.post(
+    '/public/tables/:code/orders/:id/qris-claim',
+    wrap((req) => {
+      const o = tableOrder(req.params.code, req.params.id);
+      if (o.payment_status === 'paid') return publicOrder(o);
+      db.prepare("UPDATE orders SET payment_request = 'QRIS_CLAIMED' WHERE id = ?").run(o.id);
+      const updated = loadOrder(o.id);
+      broadcastOrder(updated);
+      io.to('staff').emit('payment:claim', { id: o.id, queue_label: o.queue_label, table_name: o.table_name, customer_name: o.customer_name, total: o.total });
+      return publicOrder(updated);
+    })
+  );
+  api.get('/qris', auth('kasir'), wrap((req) => qrisSvg(Number(req.query.amount))));
+  api.get('/orders/:id/qris', auth('kasir'), wrap((req) => {
+    const o = loadOrder(Number(req.params.id));
+    if (!o) throw new HttpError(404, 'Pesanan tidak ditemukan');
+    return qrisSvg(o.total);
+  }));
+  api.post(
+    '/admin/qris/inspect',
+    auth('superadmin'),
+    wrap(async (req) => {
+      try {
+        const info = inspectQris(req.body?.payload);
+        const sample = qrisWithAmount(info.payload, 1000);
+        return { ...info, sample_svg: await QRCode.toString(sample, { type: 'svg', margin: 2, width: 240 }) };
+      } catch (e) {
+        throw bad(e.message);
+      }
+    })
+  );
+
   api.get('/public/queue', wrap(() => ({ settings: publicSettings(), orders: queueSnapshot() })));
 
   // ---------- Pesanan (staf) ----------
@@ -550,8 +626,8 @@ export function createStore({ db, broadcast }) {
       `UPDATE orders SET payment_status = 'paid', payment_method = ?, paid_amount = ?, change_amount = ?, paid_at = ?, cashier_id = ? WHERE id = ?`
     ).run(method, paid, paid - o.total, now, user.id, id);
     let updated = loadOrder(id);
-    // Jika wajib bayar dulu, pesanan otomatis masuk dapur setelah lunas.
-    if (updated.status === 'pending' && (publicSettings().require_payment_first || publicSettings().auto_accept)) {
+    // Pesanan yang sudah lunas otomatis masuk antrean dapur.
+    if (updated.status === 'pending') {
       updated = setStatus(id, 'preparing', { userId: user.id });
     } else broadcastOrder(updated);
     return updated;
@@ -810,9 +886,11 @@ export function createStore({ db, broadcast }) {
     wrap((req) => {
       const b = req.body || {};
       const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+      const merged = { ...getSettings(), ...b };
+      if (String(merged.qris_enabled) === '1' && !String(merged.qris_payload || '').trim()) throw bad('Isi kode QRIS terlebih dahulu sebelum mengaktifkan QRIS');
       for (const key of Object.keys(DEFAULT_SETTINGS)) {
         if (b[key] === undefined) continue;
-        let v = String(b[key]).slice(0, key === 'extra_fees' ? 4000 : 500);
+        let v = String(b[key]).slice(0, key === 'extra_fees' || key === 'qris_payload' ? 4000 : 500);
         if (key === 'extra_fees') {
           let parsed;
           try {
@@ -824,6 +902,13 @@ export function createStore({ db, broadcast }) {
           v = JSON.stringify(parseFees({ extra_fees: v, service_percent: 0 }));
         }
         if (key === 'tax_percent' && !(Number(v) >= 0 && Number(v) <= 100)) throw bad('Persentase PPN tidak valid');
+        if (key === 'qris_payload' && v.trim()) {
+          try {
+            v = inspectQris(v).payload;
+          } catch (e) {
+            throw bad(e.message);
+          }
+        }
         if (key === 'timezone') {
           try {
             new Intl.DateTimeFormat('en', { timeZone: v });

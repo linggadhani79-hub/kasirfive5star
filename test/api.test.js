@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { crc16, inspectQris, qrisWithAmount, parseTLV } from '../src/qris.js';
 
 // Menjalankan Worker asli (workerd) via `wrangler dev` dengan penyimpanan sementara.
 let proc, base, persist;
@@ -215,4 +216,62 @@ test('biaya tambahan otomatis (persen & nominal per jenis pesanan) + PPN termasu
   const bad = await call('PUT', '/admin/settings', { extra_fees: 'bukan json' }, admin);
   assert.equal(bad.status, 400);
   await call('PUT', '/admin/settings', { tax_inclusive: '1' }, admin);
+});
+
+// QRIS statis contoh (struktur EMVCo seperti stiker QRIS bank)
+const tlv = (id, v) => `${id}${String(v.length).padStart(2, '0')}${v}`;
+const STATIC_QRIS = (() => {
+  const body =
+    tlv('00', '01') + tlv('01', '11') +
+    tlv('26', tlv('00', 'ID.CO.BANKCONTOH.WWW') + tlv('01', '936000140000000001') + tlv('02', '000000000001') + tlv('03', 'UMI')) +
+    tlv('51', tlv('00', 'ID.CO.QRIS.WWW') + tlv('02', 'ID1026000000001') + tlv('03', 'UMI')) +
+    tlv('52', '5814') + tlv('53', '360') + tlv('58', 'ID') + tlv('59', 'FIVE5STAR COFFEE') + tlv('60', 'MATARAM') + tlv('61', '83121') + '6304';
+  return body + crc16(body);
+})();
+
+test('QRIS statis -> QRIS bernominal (CRC & tag valid)', () => {
+  assert.equal(crc16('123456789'), '29B1'); // vektor uji CRC-16/CCITT-FALSE
+  const info = inspectQris(STATIC_QRIS);
+  assert.equal(info.merchant_name, 'FIVE5STAR COFFEE');
+  assert.equal(info.dynamic, false);
+  const dyn = qrisWithAmount(STATIC_QRIS, 56175);
+  const d = inspectQris(dyn);
+  assert.equal(d.dynamic, true);
+  assert.equal(d.amount, 56175);
+  const ids = parseTLV(dyn).map((t) => t.id);
+  assert.deepEqual(ids, [...ids].sort((a, b) => Number(a) - Number(b)));
+  assert.equal(ids.at(-1), '63');
+  assert.throws(() => inspectQris(STATIC_QRIS.slice(0, -1) + '0'), /CRC/);
+});
+
+test('alur QRIS: meja bayar -> klaim -> kasir konfirmasi -> lunas & masuk dapur', async () => {
+  // aktifkan tanpa kode QRIS ditolak
+  assert.equal((await call('PUT', '/admin/settings', { qris_enabled: '1', qris_payload: '' }, admin)).status, 400);
+  assert.equal((await call('PUT', '/admin/settings', { qris_payload: '000201xyz' }, admin)).status, 400);
+  const up = await call('PUT', '/admin/settings', { qris_enabled: '1', qris_payload: STATIC_QRIS, extra_fees: '[]', require_payment_first: '0', auto_accept: '0' }, admin);
+  assert.equal(up.status, 200, JSON.stringify(up.data));
+  assert.equal((await call('GET', '/public/settings')).data.qris_enabled, true);
+
+  const menu = (await call('GET', '/public/menu')).data;
+  const espresso = menu.products.find((p) => p.name === 'Espresso');
+  const o = (await call('POST', `/public/tables/${tableCode}/orders`, { customer_name: 'Q', payment: 'qris', items: [{ product_id: espresso.id, qty: 1 }] })).data;
+  assert.equal(o.payment_request, 'QRIS');
+  assert.equal(o.status, 'pending');
+
+  const q = await call('GET', `/public/tables/${tableCode}/orders/${o.id}/qris`);
+  assert.equal(q.status, 200);
+  assert.match(q.data.svg, /<svg/);
+  assert.equal(inspectQris(q.data.payload).amount, o.total);
+  // meja lain tidak bisa mengakses pesanan ini
+  const other = (await call('GET', '/tables', null, kasir)).data[5].code;
+  assert.equal((await call('GET', `/public/tables/${other}/orders/${o.id}/qris`)).status, 404);
+
+  const claim = await call('POST', `/public/tables/${tableCode}/orders/${o.id}/qris-claim`);
+  assert.equal(claim.data.payment_request, 'QRIS_CLAIMED');
+
+  const paid = await call('POST', `/orders/${o.id}/pay`, { method: 'QRIS' }, kasir);
+  assert.equal(paid.data.payment_status, 'paid');
+  assert.equal(paid.data.payment_method, 'QRIS');
+  assert.equal(paid.data.status, 'preparing', 'lunas -> otomatis masuk antrean dapur');
+  assert.equal((await call('GET', `/public/tables/${tableCode}/orders/${o.id}/qris`)).status, 400);
 });

@@ -34,6 +34,8 @@
     .section-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .section-head h2 { flex: 1; font-size: 22px; }
     .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); }
+    .qris-box { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    .qris-box svg { width: 200px; height: 200px; background: #fff; border-radius: 12px; }
     .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -2px; }
   </style>
 </head>
@@ -56,6 +58,7 @@
     </div>
     <main id="main"></main>
   </div>
+  <script src="/js/vendor/jsQR.js"></script>
   <script type="module" src="/js/admin.js"></script>
 </body>
 </html>
