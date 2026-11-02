@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kasir-five5star",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/ws"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "CAFE", "class_name": "CafeStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CafeStore"] }],
+  "observability": { "enabled": true }
+  // PIN awal bisa diganti lewat secret sebelum deploy pertama:
+  //   npx wrangler secret put SUPERADMIN_PIN
+  //   npx wrangler secret put KASIR_PIN
+}

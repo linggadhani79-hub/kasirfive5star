@@ -1,0 +1,24 @@
+{
+  "name": "kasir-five5star",
+  "version": "1.0.0",
+  "description": "Aplikasi kasir full stack Five5Star Coffee: pemesanan dari meja, kasir, dapur/barista, dan monitor antrean dengan panggilan suara.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev --ip 0.0.0.0",
+    "deploy": "wrangler deploy",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linggadhani79-hub/kasirfive5star.git"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.156.1"
+  }
+}

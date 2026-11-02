@@ -1,0 +1,12 @@
+{
+  "name": "Five5Star Coffee POS",
+  "short_name": "Five5Star",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#22150e",
+  "theme_color": "#3b2418",
+  "icons": [
+    { "src": "/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

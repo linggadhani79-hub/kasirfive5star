@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3b2418">
+  <title>Superadmin</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .page-wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+    .pl { width: 100%; border-collapse: collapse; font-size: 15px; }
+    .pl td { padding: 9px 14px; border-bottom: 1px solid var(--line); }
+    .pl td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pl tr.sub td { padding-left: 32px; color: var(--ink-2); font-size: 14px; }
+    .pl tr.total td { font-weight: 800; background: var(--surface-2); }
+    .pl tr.grand td { font-weight: 900; font-size: 18px; background: var(--gold-soft); }
+    .neg { color: var(--bad); }
+    .pos { color: var(--ok); }
+    .bars { display: flex; flex-direction: column; gap: 6px; }
+    .bar-row { display: grid; grid-template-columns: 90px 1fr 120px; gap: 10px; align-items: center; font-size: 13px; }
+    .bar-track { height: 22px; background: var(--surface-2); border-radius: 6px; position: relative; overflow: hidden; }
+    .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--gold); border-radius: 6px; }
+    .bar-fill.profit { background: var(--ok); top: 60%; }
+    .bar-fill.loss { background: var(--bad); top: 60%; }
+    .thumb-sm { width: 46px; height: 46px; border-radius: 10px; object-fit: cover; background: var(--surface-2); display: grid; place-items: center; }
+    .opt-editor .grp { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .qr-card { text-align: center; padding: 12px; }
+    .qr-card svg { width: 160px; height: 160px; }
+    #print-area.qr-sheet .qr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10mm; }
+    #print-area.qr-sheet .qr-item { border: 1px dashed #999; padding: 6mm; text-align: center; page-break-inside: avoid; }
+    #print-area.qr-sheet svg { width: 45mm; height: 45mm; }
+    .section-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .section-head h2 { flex: 1; font-size: 22px; }
+    .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); }
+    .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -2px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span id="logo"></span><div><span id="store">Five5Star Coffee</span><small id="who">Superadmin</small></div></div>
+    <div class="spacer"></div>
+    <a class="btn" href="/kasir.html">💳 Kasir</a>
+    <button class="btn" id="btn-logout">Keluar</button>
+  </header>
+  <div class="page-wrap">
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="report">📊 Laporan & Laba Rugi</button>
+      <button class="tab" data-tab="menu">🍽️ Menu & Resep</button>
+      <button class="tab" data-tab="stock">📦 Stok Bahan</button>
+      <button class="tab" data-tab="finance">💵 Keuangan</button>
+      <button class="tab" data-tab="tables">🪑 Meja & QR</button>
+      <button class="tab" data-tab="users">👥 Pengguna</button>
+      <button class="tab" data-tab="settings">⚙️ Pengaturan</button>
+    </div>
+    <main id="main"></main>
+  </div>
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

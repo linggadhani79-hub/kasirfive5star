@@ -1,0 +1,39 @@
+name: Build APK Android
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Build APK
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Alamat Workers: Settings > Secrets and variables > Actions > Variables > SERVER_URL
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        run: |
+          # Keystore rilis opsional; tanpa itu APK ditandatangani kunci debug (tetap bisa dipasang).
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          fi
+          ./gradlew --no-daemon assembleRelease -PserverUrl="$SERVER_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: five5star-kasir-apk
+          path: android/app/build/outputs/apk/release/*.apk
