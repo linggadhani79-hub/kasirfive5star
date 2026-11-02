@@ -1,6 +1,6 @@
 import {
   $, $$, esc, api, rupiah, toast, modal, Realtime, setConn, LOGO_SVG, STATUS_LABEL, storage, requireLogin,
-  productDialog, unitPrice, optionText, chime, speak, unlockAudio, callSentence, keepAwake, timeOf, registerSW,
+  productDialog, unitPrice, optionText, calcTotals, totalsRows, chime, speak, unlockAudio, callSentence, keepAwake, timeOf, registerSW,
 } from '/js/common.js';
 
 $('#logo').innerHTML = LOGO_SVG;
@@ -150,9 +150,7 @@ function totals() {
     const p = menu.products.find((x) => x.id === c.product_id);
     return a + (p ? unitPrice(p, c.options) * c.qty : 0);
   }, 0);
-  const service = Math.round((sub * (settings?.service_percent || 0)) / 100);
-  const tax = Math.round(((sub + service) * (settings?.tax_percent || 0)) / 100);
-  return { sub, service, tax, total: sub + service + tax };
+  return { sub, ...calcTotals(sub, orderType, settings) };
 }
 
 function renderCart() {
@@ -172,8 +170,7 @@ function renderCart() {
     : '<div class="empty"><div class="big">🛒</div>Belum ada pesanan.<br>Pilih menu di sebelah kiri.</div>';
   $('#totals').innerHTML = `
     <div class="tot"><span>Subtotal</span><span>${rupiah(t.sub)}</span></div>
-    ${t.service ? `<div class="tot"><span>Service ${settings.service_percent}%</span><span>${rupiah(t.service)}</span></div>` : ''}
-    ${t.tax ? `<div class="tot"><span>Pajak ${settings.tax_percent}%</span><span>${rupiah(t.tax)}</span></div>` : ''}
+    ${totalsRows(t, settings?.tax_inclusive, settings?.tax_percent)}
     <div class="tot big"><span>Total</span><span>${rupiah(t.total)}</span></div>`;
   $('#btn-submit').disabled = !cart.length;
   $('#cart-bar-text').textContent = count ? `🛒 ${count} item — lihat keranjang` : 'Keranjang kosong';
@@ -206,6 +203,7 @@ $('#otype').addEventListener('click', (e) => {
   if (!b) return;
   orderType = b.dataset.v;
   $$('#otype button').forEach((x) => x.classList.toggle('on', x === b));
+  renderCart();
 });
 $('#cart-bar').onclick = () => $('#cart').classList.add('open');
 $('#cart-close').onclick = () => $('#cart').classList.remove('open');
