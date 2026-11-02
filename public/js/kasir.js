@@ -1,6 +1,6 @@
 import {
   $, $$, esc, api, rupiah, num, toast, modal, confirmBox, Realtime, setConn, LOGO_SVG, STATUS_LABEL, requireLogin, logout,
-  productDialog, unitPrice, optionText, chime, unlockAudio, printReceipt, timeOf, keepAwake, minutesSince,
+  productDialog, unitPrice, optionText, calcTotals, totalsRows, chime, unlockAudio, printReceipt, timeOf, keepAwake, minutesSince,
 } from '/js/common.js';
 
 $('#logo').innerHTML = LOGO_SVG;
@@ -82,8 +82,8 @@ function detailHtml(o) {
       <div style="padding:10px 12px" class="stack">
         <div class="tot"><span>Subtotal</span><span>${rupiah(o.subtotal)}</span></div>
         ${o.discount ? `<div class="tot"><span>Diskon</span><span>-${rupiah(o.discount)}</span></div>` : ''}
-        ${o.service ? `<div class="tot"><span>Service</span><span>${rupiah(o.service)}</span></div>` : ''}
-        ${o.tax ? `<div class="tot"><span>Pajak</span><span>${rupiah(o.tax)}</span></div>` : ''}
+        ${(o.fees?.length ? o.fees : o.service ? [{ name: 'Biaya tambahan', amount: o.service }] : []).map((f) => `<div class="tot"><span>${esc(f.name)}</span><span>${rupiah(f.amount)}</span></div>`).join('')}
+        ${o.tax ? `<div class="tot muted"><span>${o.tax_inclusive ? 'Termasuk PPN' : 'PPN'}</span><span>${rupiah(o.tax)}</span></div>` : ''}
         <div class="tot big"><span>Total</span><span>${rupiah(o.total)}</span></div>
         ${o.payment_status === 'paid' ? `<div class="tot small muted"><span>Dibayar ${esc(o.payment_method)}</span><span>${rupiah(o.paid_amount)} · kembali ${rupiah(o.change_amount)}</span></div>` : ''}
       </div></div>
@@ -212,9 +212,7 @@ const pos = { table_id: '', customer_name: '', order_type: 'dine_in', discount: 
 function posTotals() {
   const sub = posCart.reduce((a, c) => a + unitPrice(menu.products.find((p) => p.id === c.product_id), c.options) * c.qty, 0);
   const disc = Math.min(sub, Number(pos.discount) || 0);
-  const service = Math.round(((sub - disc) * settings.service_percent) / 100);
-  const tax = Math.round(((sub - disc + service) * settings.tax_percent) / 100);
-  return { sub, disc, service, tax, total: sub - disc + service + tax };
+  return { sub, disc, ...calcTotals(sub - disc, pos.order_type, settings) };
 }
 
 function renderPos() {
@@ -244,8 +242,7 @@ function renderPos() {
         <input class="input" data-f="note" placeholder="Catatan" value="${esc(pos.note)}">
         <div class="tot"><span>Subtotal</span><span>${rupiah(t.sub)}</span></div>
         ${t.disc ? `<div class="tot"><span>Diskon</span><span>-${rupiah(t.disc)}</span></div>` : ''}
-        ${t.service ? `<div class="tot"><span>Service</span><span>${rupiah(t.service)}</span></div>` : ''}
-        ${t.tax ? `<div class="tot"><span>Pajak</span><span>${rupiah(t.tax)}</span></div>` : ''}
+        ${totalsRows(t, settings.tax_inclusive, settings.tax_percent)}
         <div class="tot big"><span>Total</span><span>${rupiah(t.total)}</span></div>
         <div class="grid-2"><button class="btn lg" data-save ${posCart.length ? '' : 'disabled'}>Simpan (bayar nanti)</button><button class="btn gold lg" data-paynow ${posCart.length ? '' : 'disabled'}>Bayar</button></div>
       </div>
@@ -428,7 +425,7 @@ async function renderReport() {
     area.className = 'receipt';
     const l = (a, b) => `<div class="l"><span>${a}</span><span>${b}</span></div>`;
     area.innerHTML = `<h2>${esc(settings.store_name)}</h2><div class="c">TUTUP KASIR ${esc(r.label)}<br>${esc(user.name)} · ${new Date().toLocaleTimeString('id-ID')}</div><hr>
-      ${l('Transaksi', s.orders)}${l('Penjualan kotor', rupiah(s.gross))}${l('Diskon', '-' + rupiah(s.discount))}${l('Service', rupiah(s.service))}${l('Pajak', rupiah(s.tax))}${l('<b>Total</b>', '<b>' + rupiah(s.total) + '</b>')}<hr>
+      ${l('Transaksi', s.orders)}${l('Penjualan kotor', rupiah(s.gross))}${l('Diskon', '-' + rupiah(s.discount))}${l('Biaya tambahan', rupiah(s.service))}${l('<b>Total</b>', '<b>' + rupiah(s.total) + '</b>')}${l('PPN di dalamnya', rupiah(s.tax))}<hr>
       ${r.byMethod.map((m) => l(esc(m.method), rupiah(m.total))).join('')}<hr>${l('Belum bayar', rupiah(r.unpaid.amount))}${l('Dibatalkan', r.cancelled)}`;
     setTimeout(() => print(), 50);
   };

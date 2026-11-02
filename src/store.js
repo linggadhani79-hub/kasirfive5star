@@ -35,6 +35,8 @@ export function createStore({ db, broadcast }) {
     receipt_footer: s.receipt_footer,
     tax_percent: Number(s.tax_percent) || 0,
     service_percent: Number(s.service_percent) || 0,
+    tax_inclusive: s.tax_inclusive === '1',
+    extra_fees: parseFees(s),
     voice_template: s.voice_template,
     voice_repeat: Number(s.voice_repeat) || 1,
     voice_rate: Number(s.voice_rate) || 1,
@@ -43,6 +45,27 @@ export function createStore({ db, broadcast }) {
     require_payment_first: s.require_payment_first === '1',
     auto_accept: s.auto_accept === '1',
   });
+
+  // Biaya tambahan otomatis dari pengaturan (+ service charge lama bila diisi).
+  const parseFees = (s) => {
+    let list = [];
+    try {
+      list = JSON.parse(s.extra_fees || '[]');
+    } catch {
+      list = [];
+    }
+    if (!Array.isArray(list)) list = [];
+    const out = list
+      .filter((f) => f && String(f.name || '').trim() && Number(f.value) > 0)
+      .map((f) => ({
+        name: String(f.name).trim().slice(0, 40),
+        type: f.type === 'fixed' ? 'fixed' : 'percent',
+        value: Number(f.value),
+        applies: ['dine_in', 'takeaway'].includes(f.applies) ? f.applies : 'all',
+      }));
+    if (Number(s.service_percent) > 0) out.unshift({ name: 'Service charge', type: 'percent', value: Number(s.service_percent), applies: 'all' });
+    return out;
+  };
 
   const nowIso = () => new Date().toISOString();
   const businessDate = (date = new Date()) => {
@@ -68,6 +91,8 @@ export function createStore({ db, broadcast }) {
       .all(id)
       .map((it) => ({ ...it, options: safeJson(it.options, []) }));
     o.queue_label = `${getSettings().queue_prefix || ''}${String(o.queue_no).padStart(3, '0')}`;
+    o.fees = safeJson(o.fees, []);
+    o.tax_inclusive = !!o.tax_inclusive;
     return o;
   };
 
@@ -86,6 +111,8 @@ export function createStore({ db, broadcast }) {
     service: o.service,
     tax: o.tax,
     discount: o.discount,
+    fees: o.fees,
+    tax_inclusive: o.tax_inclusive,
     note: o.note,
     created_at: o.created_at,
     ready_at: o.ready_at,
@@ -171,18 +198,31 @@ export function createStore({ db, broadcast }) {
     });
   };
 
+  // Perhitungan total (sama persis dengan calcTotals di public/js/common.js).
+  // Harga sudah termasuk PPN: PPN = bagian dari total, tidak ditambahkan.
+  const computeTotals = (base, type, s) => {
+    const fees = s.extra_fees
+      .filter((f) => f.applies === 'all' || f.applies === type)
+      .map((f) => ({ name: f.name, amount: Math.round(f.type === 'fixed' ? f.value : (base * f.value) / 100) }))
+      .filter((f) => f.amount > 0 && base > 0);
+    const service = fees.reduce((a, f) => a + f.amount, 0);
+    const gross = base + service;
+    const tax = s.tax_inclusive ? Math.round((gross * s.tax_percent) / (100 + s.tax_percent)) : Math.round((gross * s.tax_percent) / 100);
+    const total = s.tax_inclusive ? gross : gross + tax;
+    return { fees, service, tax, total };
+  };
+
   const createOrder = ({ items, table, customer_name, note, order_type, source, cashier_id, discount = 0 }) => {
     const priced = priceItems(items);
     const s = publicSettings();
     const subtotal = priced.reduce((a, b) => a + b.line_total, 0);
     const disc = Math.max(0, Math.min(subtotal, Math.trunc(Number(discount) || 0)));
     const base = subtotal - disc;
-    const service = Math.round((base * s.service_percent) / 100);
-    const tax = Math.round(((base + service) * s.tax_percent) / 100);
-    const total = base + service + tax;
+    const type = order_type === 'takeaway' ? 'takeaway' : 'dine_in';
+    const t = computeTotals(base, type, s);
+    const { service, tax, total, fees } = t;
     const date = businessDate();
     const autoAccept = source === 'kasir' || s.auto_accept;
-    const type = order_type === 'takeaway' ? 'takeaway' : 'dine_in';
 
     const id = tx(db, () => {
       const next = db.prepare('SELECT COALESCE(MAX(queue_no), 0) + 1 AS n FROM orders WHERE business_date = ?').get(date).n;
@@ -190,8 +230,8 @@ export function createStore({ db, broadcast }) {
       const res = db
         .prepare(
           `INSERT INTO orders (queue_no, business_date, table_id, table_name, customer_name, note, order_type, source, status,
-             subtotal, discount, service, tax, total, cashier_id, created_at, accepted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             subtotal, discount, service, tax, total, cashier_id, created_at, accepted_at, fees, tax_inclusive)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           next,
@@ -210,7 +250,9 @@ export function createStore({ db, broadcast }) {
           total,
           cashier_id ?? null,
           now,
-          autoAccept ? now : null
+          autoAccept ? now : null,
+          JSON.stringify(fees),
+          s.tax_inclusive ? 1 : 0
         );
       const orderId = Number(res.lastInsertRowid);
       const insItem = db.prepare(
@@ -770,7 +812,18 @@ export function createStore({ db, broadcast }) {
       const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
       for (const key of Object.keys(DEFAULT_SETTINGS)) {
         if (b[key] === undefined) continue;
-        let v = String(b[key]).slice(0, 500);
+        let v = String(b[key]).slice(0, key === 'extra_fees' ? 4000 : 500);
+        if (key === 'extra_fees') {
+          let parsed;
+          try {
+            parsed = JSON.parse(v);
+          } catch {
+            throw bad('Format biaya tambahan tidak valid');
+          }
+          if (!Array.isArray(parsed)) throw bad('Format biaya tambahan tidak valid');
+          v = JSON.stringify(parseFees({ extra_fees: v, service_percent: 0 }));
+        }
+        if (key === 'tax_percent' && !(Number(v) >= 0 && Number(v) <= 100)) throw bad('Persentase PPN tidak valid');
         if (key === 'timezone') {
           try {
             new Intl.DateTimeFormat('en', { timeZone: v });
@@ -1046,7 +1099,7 @@ export function createStore({ db, broadcast }) {
       .prepare(`SELECT AVG((julianday(ready_at) - julianday(accepted_at)) * 1440) AS minutes FROM orders WHERE business_date BETWEEN ? AND ? AND ready_at IS NOT NULL AND accepted_at IS NOT NULL`)
       .get(from, to).minutes;
 
-    const netSales = sales.gross - sales.discount + sales.service; // pajak = titipan, bukan pendapatan
+    const netSales = sales.total - sales.tax; // PPN = titipan negara, bukan pendapatan (berlaku untuk harga termasuk/belum termasuk PPN)
     const report = {
       period, from, to, label,
       sales: { ...sales, net_sales: netSales, items_sold: itemsSold, avg_ticket: sales.orders ? Math.round(sales.total / sales.orders) : 0 },
@@ -1095,7 +1148,7 @@ export function createStore({ db, broadcast }) {
     };
     // Rincian per hari (bulanan/rentang) atau per bulan (tahunan)
     const salesRows = db
-      .prepare(`SELECT ${groupExpr} AS k, COUNT(*) AS orders, SUM(subtotal - discount + service) AS net_sales, SUM(total) AS total, SUM(cogs) AS cogs FROM orders WHERE ${paid} GROUP BY k`)
+      .prepare(`SELECT ${groupExpr} AS k, COUNT(*) AS orders, SUM(total - tax) AS net_sales, SUM(total) AS total, SUM(cogs) AS cogs FROM orders WHERE ${paid} GROUP BY k`)
       .all(from, to);
     const expRows = db.prepare(`SELECT ${groupExpr} AS k, SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) AS expenses, SUM(CASE WHEN type='income' THEN amount ELSE 0 END) AS income FROM cash_entries WHERE business_date BETWEEN ? AND ? GROUP BY k`).all(from, to);
     const lossRows = db.prepare(`SELECT ${groupExpr} AS k, -SUM(total_cost) AS loss FROM stock_movements WHERE business_date BETWEEN ? AND ? AND type IN ('waste','adjust') GROUP BY k`).all(from, to);
@@ -1133,10 +1186,10 @@ export function createStore({ db, broadcast }) {
       lines.push(['LABA RUGI', 'Nominal'].map(esc).join(','));
       const pl = r.profit_loss;
       for (const [k, v] of [
-        ['Penjualan kotor', r.sales.gross], ['Diskon', -r.sales.discount], ['Service charge', r.sales.service], ['Penjualan bersih', pl.net_sales],
+        ['Penjualan kotor', r.sales.gross], ['Diskon', -r.sales.discount], ['Biaya tambahan', r.sales.service], ['PPN', -r.sales.tax], ['Penjualan bersih (tanpa PPN)', pl.net_sales],
         ['HPP (harga pokok penjualan)', -pl.cogs], ['Laba kotor', pl.gross_profit], ['Selisih/kerugian stok', -pl.stock_loss],
         ...pl.expenses.map((e) => [`Biaya: ${e.category}`, -e.amount]), ['Total biaya operasional', -pl.total_expenses],
-        ...pl.other_income.map((e) => [`Pendapatan lain: ${e.category}`, e.amount]), ['Laba bersih', pl.net_profit], ['Pajak terkumpul (titipan)', pl.tax_collected],
+        ...pl.other_income.map((e) => [`Pendapatan lain: ${e.category}`, e.amount]), ['Laba bersih', pl.net_profit], ['PPN terkumpul (disetor)', pl.tax_collected],
       ]) lines.push([k, v].map(esc).join(','));
       if (r.breakdown) {
         lines.push('');

@@ -405,9 +405,10 @@ export function printReceipt(order, settings) {
     <hr>
     ${line('Subtotal', rupiah(order.subtotal))}
     ${order.discount ? line('Diskon', '-' + rupiah(order.discount)) : ''}
-    ${order.service ? line('Service', rupiah(order.service)) : ''}
-    ${order.tax ? line('Pajak', rupiah(order.tax)) : ''}
+    ${(order.fees?.length ? order.fees : order.service ? [{ name: 'Biaya tambahan', amount: order.service }] : []).map((f) => line(esc(f.name), rupiah(f.amount))).join('')}
+    ${!order.tax_inclusive && order.tax ? line('PPN', rupiah(order.tax)) : ''}
     ${line('<b>TOTAL</b>', `<b>${rupiah(order.total)}</b>`)}
+    ${order.tax_inclusive && order.tax ? line('Termasuk PPN', rupiah(order.tax)) : ''}
     ${order.payment_status === 'paid'
       ? line(esc(order.payment_method), rupiah(order.paid_amount)) + (order.change_amount ? line('Kembali', rupiah(order.change_amount)) : '')
       : '<div class="c"><b>BELUM DIBAYAR</b></div>'}
@@ -505,6 +506,26 @@ export function productDialog(p, { qty = 1 } = {}) {
     };
     draw();
   });
+}
+
+// Total pesanan di sisi klien (hanya tampilan; logika sama dengan computeTotals di server).
+// base = subtotal - diskon. Harga sudah termasuk PPN bila settings.tax_inclusive.
+export function calcTotals(base, orderType, settings) {
+  const fees = (settings?.extra_fees || [])
+    .filter((f) => f.applies === 'all' || f.applies === orderType)
+    .map((f) => ({ name: f.name, amount: Math.round(f.type === 'fixed' ? f.value : (base * f.value) / 100) }))
+    .filter((f) => f.amount > 0 && base > 0);
+  const service = fees.reduce((a, f) => a + f.amount, 0);
+  const gross = base + service;
+  const pct = Number(settings?.tax_percent) || 0;
+  const tax = settings?.tax_inclusive ? Math.round((gross * pct) / (100 + pct)) : Math.round((gross * pct) / 100);
+  return { fees, service, tax, total: settings?.tax_inclusive ? gross : gross + tax };
+}
+
+// Baris rincian biaya + PPN (dipakai layar meja, kasir).
+export function totalsRows({ fees, tax }, taxInclusive, taxPercent) {
+  return `${fees.map((f) => `<div class="tot"><span>${esc(f.name)}</span><span>${rupiah(f.amount)}</span></div>`).join('')}
+    ${tax ? `<div class="tot muted"><span>${taxInclusive ? `Termasuk PPN ${num(taxPercent, 2)}%` : `PPN ${num(taxPercent, 2)}%`}</span><span>${rupiah(tax)}</span></div>` : ''}`;
 }
 
 // Harga satuan item keranjang di sisi klien (hanya tampilan; server menghitung ulang).

@@ -143,9 +143,13 @@ test('pesan dari meja -> terima -> stok berkurang -> siap -> bayar -> laba rugi'
   await call('POST', '/finance/entries', { type: 'expense', category: 'Listrik & Air', amount: 10000 }, kasir);
   const rep = await call('GET', '/reports?period=day', null, admin);
   const pl = rep.data.profit_loss;
-  assert.equal(pl.net_sales, 50000);
+  // harga sudah termasuk PPN 11%: total tetap 50.000, PPN di dalamnya = 50.000 x 11/111
+  assert.equal(o.data.tax_inclusive, true);
+  assert.equal(pay.data.tax, Math.round((50000 * 11) / 111));
+  assert.equal(pl.net_sales, 50000 - pay.data.tax);
+  assert.equal(pl.tax_collected, pay.data.tax);
   assert.equal(pl.cogs, ready.data.cogs);
-  assert.equal(pl.gross_profit, 50000 - pl.cogs);
+  assert.equal(pl.gross_profit, pl.net_sales - pl.cogs);
   assert.equal(pl.net_profit, pl.gross_profit - 10000 - pl.stock_loss);
 
   const month = await call('GET', '/reports?period=month', null, admin);
@@ -184,4 +188,31 @@ test('aset statis & gambar menu tersaji', async () => {
   const root = base.replace('/api', '');
   assert.equal((await fetch(root + '/kasir.html')).status, 200);
   assert.equal((await fetch(root + '/img/menu/matcha.jpg')).status, 200);
+});
+
+test('biaya tambahan otomatis (persen & nominal per jenis pesanan) + PPN termasuk', async () => {
+  const fees = [
+    { name: 'Service charge', type: 'percent', value: 5, applies: 'dine_in' },
+    { name: 'Biaya kemasan', type: 'fixed', value: 2000, applies: 'takeaway' },
+  ];
+  const up = await call('PUT', '/admin/settings', { extra_fees: JSON.stringify(fees), tax_percent: '11', tax_inclusive: '1' }, admin);
+  assert.equal(up.status, 200, JSON.stringify(up.data));
+  const menu = (await call('GET', '/public/menu')).data;
+  const espresso = menu.products.find((p) => p.name === 'Espresso'); // Rp14.000
+  const dine = await call('POST', `/public/tables/${tableCode}/orders`, { customer_name: 'A', order_type: 'dine_in', items: [{ product_id: espresso.id, qty: 2 }] });
+  assert.equal(dine.data.subtotal, 28000);
+  assert.deepEqual(dine.data.fees, [{ name: 'Service charge', amount: 1400 }]);
+  assert.equal(dine.data.total, 29400);
+  assert.equal(dine.data.tax, Math.round((29400 * 11) / 111));
+  const take = await call('POST', `/public/tables/${tableCode}/orders`, { customer_name: 'B', order_type: 'takeaway', items: [{ product_id: espresso.id, qty: 1 }] });
+  assert.deepEqual(take.data.fees, [{ name: 'Biaya kemasan', amount: 2000 }]);
+  assert.equal(take.data.total, 16000);
+  // mode PPN belum termasuk: PPN ditambahkan
+  await call('PUT', '/admin/settings', { extra_fees: '[]', tax_inclusive: '0' }, admin);
+  const excl = await call('POST', '/orders', { items: [{ product_id: espresso.id, qty: 1 }] }, kasir);
+  assert.equal(excl.data.tax, 1540);
+  assert.equal(excl.data.total, 15540);
+  const bad = await call('PUT', '/admin/settings', { extra_fees: 'bukan json' }, admin);
+  assert.equal(bad.status, 400);
+  await call('PUT', '/admin/settings', { tax_inclusive: '1' }, admin);
 });

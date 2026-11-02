@@ -72,8 +72,9 @@ async function renderReport() {
         <table class="pl">
           <tr><td>Penjualan kotor</td><td>${rupiah(s.gross)}</td></tr>
           <tr class="sub"><td>Diskon</td><td>${signed(-s.discount)}</td></tr>
-          <tr class="sub"><td>Service charge</td><td>${rupiah(s.service)}</td></tr>
-          <tr class="total"><td>Penjualan bersih</td><td>${rupiah(pl.net_sales)}</td></tr>
+          <tr class="sub"><td>Biaya tambahan otomatis</td><td>${rupiah(s.service)}</td></tr>
+          <tr class="sub"><td>PPN ${'(termasuk dalam harga, disetor)'}</td><td>${signed(-s.tax)}</td></tr>
+          <tr class="total"><td>Penjualan bersih (tanpa PPN)</td><td>${rupiah(pl.net_sales)}</td></tr>
           <tr><td>Harga pokok penjualan (HPP)</td><td>${signed(-pl.cogs)}</td></tr>
           <tr class="total"><td>Laba kotor</td><td>${signed(pl.gross_profit)}</td></tr>
           <tr><td>Selisih / kerugian stok (terbuang, opname)</td><td>${signed(-pl.stock_loss)}</td></tr>
@@ -82,7 +83,7 @@ async function renderReport() {
           <tr><td>Pendapatan lain</td><td>${rupiah(pl.total_other_income)}</td></tr>
           ${pl.other_income.map((x) => `<tr class="sub"><td>${esc(x.category)}</td><td>${rupiah(x.amount)}</td></tr>`).join('')}
           <tr class="grand"><td>LABA BERSIH</td><td>${signed(pl.net_profit)}</td></tr>
-          <tr class="sub"><td>Pajak terkumpul (titipan, tidak dihitung laba)</td><td>${rupiah(pl.tax_collected)}</td></tr>
+          <tr class="sub"><td>PPN terkumpul (wajib disetor, bukan laba)</td><td>${rupiah(pl.tax_collected)}</td></tr>
           <tr class="sub"><td>Pembelian stok periode ini (arus kas)</td><td>${rupiah(pl.stock_purchases)}</td></tr>
         </table></div>
       <div class="stack">
@@ -609,15 +610,35 @@ function userEditor(u) {
 }
 
 // ===================== PENGATURAN =====================
+const feeRow = (f = { name: '', type: 'percent', value: '', applies: 'all' }) => `<div class="row wrap" data-fee>
+  <input class="input grow" data-fname placeholder="Nama (mis. Service charge)" value="${esc(f.name)}" style="min-width:160px">
+  <select class="input" data-ftype style="max-width:130px"><option value="percent" ${f.type === 'percent' ? 'selected' : ''}>Persen (%)</option><option value="fixed" ${f.type === 'fixed' ? 'selected' : ''}>Nominal (Rp)</option></select>
+  <input class="input" data-fvalue inputmode="decimal" placeholder="Nilai" value="${f.value}" style="max-width:110px">
+  <select class="input" data-fapplies style="max-width:170px"><option value="all" ${f.applies === 'all' ? 'selected' : ''}>Semua pesanan</option><option value="dine_in" ${f.applies === 'dine_in' ? 'selected' : ''}>Makan di tempat</option><option value="takeaway" ${f.applies === 'takeaway' ? 'selected' : ''}>Bawa pulang</option></select>
+  <button class="btn sm ghost" data-delfee>✕</button></div>`;
+
 async function renderSettings() {
   const s = await api('/admin/settings');
+  let fees = [];
+  try {
+    fees = JSON.parse(s.extra_fees || '[]');
+  } catch {
+    fees = [];
+  }
+  // Service charge lama dipindahkan ke daftar biaya tambahan
+  if (Number(s.service_percent) > 0) fees.unshift({ name: 'Service charge', type: 'percent', value: Number(s.service_percent), applies: 'all' });
   const f = (key, label, extra = '') => `<label class="field"><span>${label}</span><input class="input" data-s="${key}" value="${esc(s[key] ?? '')}" ${extra}></label>`;
   const chk = (key, label) => `<label class="check"><input type="checkbox" data-s="${key}" ${s[key] === '1' ? 'checked' : ''}> ${label}</label>`;
   $('#main').innerHTML = `<div class="stack" style="gap:14px;max-width:860px">
     <h2>Pengaturan</h2>
     <div class="card pad stack"><h3>Toko & struk</h3><div class="grid-2">${f('store_name', 'Nama toko')}${f('store_phone', 'Telepon')}</div>${f('store_address', 'Alamat')}${f('receipt_footer', 'Catatan kaki struk')}</div>
-    <div class="card pad stack"><h3>Pajak & biaya</h3><div class="grid-3">${f('tax_percent', 'Pajak / PB1 (%)', 'inputmode="decimal"')}${f('service_percent', 'Service charge (%)', 'inputmode="decimal"')}${f('timezone', 'Zona waktu')}</div>
+    <div class="card pad stack"><h3>PPN</h3><div class="grid-3">${f('tax_percent', 'PPN (%)', 'inputmode="decimal"')}${f('timezone', 'Zona waktu')}</div>
+      ${chk('tax_inclusive', 'Harga menu sudah termasuk PPN (PPN dihitung dari dalam harga, tidak ditambahkan ke tagihan)')}
       ${f('payment_methods', 'Metode pembayaran (pisahkan koma; "Tunai" untuk hitung kembalian)')}</div>
+    <div class="card pad stack"><h3>Biaya tambahan otomatis</h3>
+      <p class="small muted" style="margin:0">Ditambahkan otomatis ke setiap pesanan sesuai jenisnya, mis. service charge 5% atau biaya kemasan Rp2.000 untuk bawa pulang.</p>
+      <div class="stack" id="fees">${fees.map(feeRow).join('')}</div>
+      <button class="btn sm" data-addfee style="align-self:flex-start">+ Biaya tambahan</button></div>
     <div class="card pad stack"><h3>Alur pesanan</h3>
       ${chk('auto_accept', 'Pesanan dari meja langsung masuk ke barista (tanpa konfirmasi kasir)')}
       ${chk('require_payment_first', 'Wajib bayar dulu di kasir sebelum pesanan dibuat (pesanan otomatis ke barista setelah lunas)')}
@@ -630,9 +651,15 @@ async function renderSettings() {
     <div class="row"><span class="grow"></span><button class="btn gold lg" data-save>Simpan Pengaturan</button></div>
   </div>`;
   $('#main').onclick = async (e) => {
+    if (e.target.closest('[data-addfee]')) return $('#fees').insertAdjacentHTML('beforeend', feeRow());
+    if (e.target.closest('[data-delfee]')) return e.target.closest('[data-fee]').remove();
     if (!e.target.closest('[data-save]')) return;
     const body = {};
     $$('[data-s]').forEach((i) => (body[i.dataset.s] = i.type === 'checkbox' ? (i.checked ? '1' : '0') : i.value));
+    body.service_percent = '0';
+    body.extra_fees = JSON.stringify(
+      $$('[data-fee]').map((r) => ({ name: $('[data-fname]', r).value.trim(), type: $('[data-ftype]', r).value, value: Number($('[data-fvalue]', r).value.replace(',', '.')) || 0, applies: $('[data-fapplies]', r).value })).filter((f) => f.name && f.value > 0)
+    );
     try {
       await api('/admin/settings', { method: 'PUT', body });
       toast('Pengaturan tersimpan', 'ok');

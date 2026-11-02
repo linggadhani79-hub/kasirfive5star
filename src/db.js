@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS orders (
   cancel_reason TEXT DEFAULT '',
   call_count INTEGER NOT NULL DEFAULT 0,
   cogs INTEGER NOT NULL DEFAULT 0,
+  fees TEXT NOT NULL DEFAULT '[]',
+  tax_inclusive INTEGER NOT NULL DEFAULT 0,
   stock_deducted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   accepted_at TEXT,
@@ -181,8 +183,12 @@ export const DEFAULT_SETTINGS = {
   store_address: 'Jl. Kopi Bintang No. 5',
   store_phone: '',
   receipt_footer: 'Terima kasih, sampai jumpa lagi! ☕',
-  tax_percent: '0',
+  tax_percent: '11',
+  // 1 = harga menu sudah termasuk PPN (PPN dihitung dari dalam harga, tidak ditambahkan)
+  tax_inclusive: '1',
   service_percent: '0',
+  // Biaya tambahan otomatis: [{name, type:'percent'|'fixed', value, applies:'all'|'dine_in'|'takeaway'}]
+  extra_fees: '[]',
   timezone: 'Asia/Jakarta',
   auto_accept: '0',
   require_payment_first: '0',
@@ -269,9 +275,17 @@ export function wrapSql(storage) {
   };
 }
 
+// Migrasi ringan untuk database yang sudah berjalan (kolom baru).
+function migrate(db) {
+  const cols = new Set(db.prepare("SELECT name FROM pragma_table_info('orders')").all().map((c) => c.name));
+  if (!cols.has('fees')) db.exec("ALTER TABLE orders ADD COLUMN fees TEXT NOT NULL DEFAULT '[]'");
+  if (!cols.has('tax_inclusive')) db.exec('ALTER TABLE orders ADD COLUMN tax_inclusive INTEGER NOT NULL DEFAULT 0');
+}
+
 export async function initDb(storage, env = {}) {
   const db = wrapSql(storage);
   db.exec(SCHEMA);
+  migrate(db);
   await seed(db, env);
   return db;
 }
